@@ -102,7 +102,7 @@ def parse_pkt(src):
 
 
 class TFTPClient:
-    def __init__(self, ip, port, timeout=1, connect_timeout=5, session_timeout=10, blocksize=1468):
+    def __init__(self, ip, port, timeout=1, connect_timeout=10, session_timeout=10, blocksize=1468):
         self.sock = None
         self.connect_timeout = connect_timeout
         self.session_timeout = session_timeout
@@ -141,10 +141,10 @@ class TFTPClient:
                     if resp:
                         return resp, remote
             # sleep more, avoid resend if woke up prematurely
-            time.sleep(rxstart + self.timeout - rxend)
+            time.sleep(max(rxstart + self.timeout - rxend, 0))
 
 
-    def process_err(self, rx):
+    def process_generic_err(self, rx):
         if rx['op'] == Opcode.ERR:
             errcode = rx['errcode']
             msg = rx['msg']
@@ -166,7 +166,12 @@ class TFTPClient:
 
 
     def handle_read_connect(self, rx):
-        self.process_err(rx)
+        # NOTE: in our implementation custom code most likely means 'busy'.
+        # do not bail out, just retry
+        if rx['op'] == Opcode.ERR and rx['errcode'] == Errcode.CUSTOM:
+            return None
+
+        self.process_generic_err(rx)
         if rx['op'] == Opcode.OACK:
             return rx
         if rx['op'] == Opcode.DATA:
@@ -177,7 +182,10 @@ class TFTPClient:
 
 
     def handle_write_connect(self, rx):
-        self.process_err(rx)
+        if rx['op'] == Opcode.ERR and rx['errcode'] == Errcode.CUSTOM:
+            return None
+
+        self.process_generic_err(rx)
         if rx['op'] == Opcode.OACK:
             return rx
         if rx['op'] == Opcode.ACK:
@@ -188,7 +196,7 @@ class TFTPClient:
 
 
     def handle_data_rx(self, rx):
-        self.process_err(rx)
+        self.process_generic_err(rx)
         if rx['op'] == Opcode.DATA:
             if rx['blocknum'] == self.blocknum + 1:
                 return rx
@@ -197,7 +205,7 @@ class TFTPClient:
 
 
     def handle_data_tx(self, rx):
-        self.process_err(rx)
+        self.process_generic_err(rx)
         if rx['op'] == Opcode.ACK:
             if rx['acknum'] == self.blocknum:
                 return rx
